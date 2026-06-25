@@ -35,6 +35,9 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 import org.apache.commons.cli.CommandLine;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.List;
 
 /** Executor for doing the composing and submitting logic for {@link CliFrontend}. */
@@ -108,7 +111,18 @@ public class CliExecutor {
     // The main class for running application mode
     public static void main(String[] args) throws Exception {
         PipelineDefinitionParser pipelineDefinitionParser = new YamlPipelineDefinitionParser();
-        PipelineDef pipelineDef = pipelineDefinitionParser.parse(args[0], new Configuration());
+        // args[0] is the pipeline definition FILE PATH. In application mode the deployment
+        // executors set ApplicationConfiguration.APPLICATION_ARGS = commandLine.getArgList(), i.e.
+        // the pipeline definition file path (shipped into the JobManager container). Read its
+        // content with the local JVM file API instead of Flink's FileSystem: the cluster default
+        // FileSystem may be S3, in which case FileSystem.get(localPath) would not find the local
+        // file. Then parse the content via the String overload. Without this, the String overload
+        // would treat the path itself as YAML content and fail with:
+        // Missing required field "source" in top-level configuration.
+        String pipelineDefContent =
+                new String(Files.readAllBytes(Paths.get(args[0])), StandardCharsets.UTF_8);
+        PipelineDef pipelineDef =
+                pipelineDefinitionParser.parse(pipelineDefContent, new Configuration());
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         FlinkPipelineComposer flinkPipelineComposer =
                 FlinkPipelineComposer.ofApplicationCluster(env);
