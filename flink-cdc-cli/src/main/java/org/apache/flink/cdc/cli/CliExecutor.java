@@ -30,6 +30,7 @@ import org.apache.flink.cdc.composer.flink.deployment.ComposeDeployment;
 import org.apache.flink.cdc.composer.flink.deployment.K8SApplicationDeploymentExecutor;
 import org.apache.flink.cdc.composer.flink.deployment.YarnApplicationDeploymentExecutor;
 import org.apache.flink.configuration.DeploymentOptions;
+import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
@@ -108,7 +109,19 @@ public class CliExecutor {
     // The main class for running application mode
     public static void main(String[] args) throws Exception {
         PipelineDefinitionParser pipelineDefinitionParser = new YamlPipelineDefinitionParser();
-        PipelineDef pipelineDef = pipelineDefinitionParser.parse(args[0], new Configuration());
+        // args[0] is the pipeline definition. In application mode the deployment executors set
+        // ApplicationConfiguration.APPLICATION_ARGS = commandLine.getArgList(), i.e. the pipeline
+        // definition FILE PATH. Prefer the Path overload (read the file) when args[0] points to an
+        // existing file, consistent with CliExecutor#run -> deployWithComposer; otherwise fall back
+        // to the String overload (treat args[0] as YAML content) for backward compatibility.
+        // Without this, the String overload would treat the path itself as YAML content and fail
+        // with: Missing required field "source" in top-level configuration.
+        Path pipelineDefPath = new Path(args[0]);
+        FileSystem fileSystem = FileSystem.get(pipelineDefPath.toUri());
+        PipelineDef pipelineDef =
+                fileSystem.exists(pipelineDefPath)
+                        ? pipelineDefinitionParser.parse(pipelineDefPath, new Configuration())
+                        : pipelineDefinitionParser.parse(args[0], new Configuration());
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         FlinkPipelineComposer flinkPipelineComposer =
                 FlinkPipelineComposer.ofApplicationCluster(env);
